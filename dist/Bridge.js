@@ -156,18 +156,25 @@ var Bridge = function (_EventEmitter) {
       meta.path.push(this.id); // add our ID to the message path
 
       if (meta.owner === this.id) {
-        var _state;
+        var retval = undefined;
+        var error = undefined;
+        try {
+          var _state;
 
-        var retval = (_state = this.state)[name].apply(_state, _toConsumableArray(args)); // Call function if target is local
-        rr[0](retval); // Resolve local call promise
+          var _retval = (_state = this.state)[name].apply(_state, _toConsumableArray(args)); // Call function if target is local
+          rr[0](_retval); // Resolve local call promise
+        } catch (e) {
+          rr[1](e.message);
+          error = e.message;
+        }
         this.peers.forEach(function (peer) {
           // broadcast return value if remote call origin
           peer.ws.send(JSON.stringify({
-            type: 'funcReturn',
+            type: error ? 'funcReject' : 'funcReturn',
             from: _this5.id,
             origin: _this5.id,
             id: meta.call_id,
-            value: retval
+            value: error ? error : retval
           }));
         });
       } else {
@@ -305,7 +312,6 @@ var Bridge = function (_EventEmitter) {
       }
 
       var obj = JSON.parse(msg.data); // Parse Incoming Message
-
       this.emit('message', obj);
 
       if (obj.type === 'varSet') {
@@ -349,11 +355,11 @@ var Bridge = function (_EventEmitter) {
           path: obj.path
         });
       }
-
-      if (obj.type === 'funcReturn') {
+      if (obj.type === 'funcReturn' || obj.type === 'funcReject') {
         // Function return value
         if (Object.keys(this.call_queue).includes(obj.id)) {
-          this.call_queue[obj.id]['rr'][0](obj.value); // Resolve if our call queue contains the return target
+          if (obj.type === 'funcReturn') this.call_queue[obj.id]['rr'][0](obj.value);
+          if (obj.type === 'funcReject') this.call_queue[obj.id]['rr'][1](obj.value);
           clearTimeout(this.call_queue[obj.id]['timeout']);
           delete this.call_queue[obj.id];
         } else {

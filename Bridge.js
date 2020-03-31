@@ -110,15 +110,22 @@ class Bridge extends EventEmitter {
     meta.path.push(this.id)                                                     // add our ID to the message path
 
     if(meta.owner === this.id){
-      let retval = this.state[name](...args)                                    // Call function if target is local
-      rr[0](retval)                                                             // Resolve local call promise
+      let retval = undefined
+      let error = undefined
+      try {
+        let retval = this.state[name](...args)                                    // Call function if target is local
+        rr[0](retval)                                                             // Resolve local call promise
+      }catch(e){
+        rr[1](e.message)
+        error = e.message
+      }
       this.peers.forEach((peer) => {                                            // broadcast return value if remote call origin
         peer.ws.send(JSON.stringify({
-          type: 'funcReturn',
+          type: error ? 'funcReject' : 'funcReturn',
           from: this.id,
           origin: this.id,
           id: meta.call_id,
-          value: retval
+          value: error ? error : retval,
         }))
       })
     } else {                                                                    // Send network request to call remote function
@@ -213,7 +220,6 @@ class Bridge extends EventEmitter {
     }
 
     let obj = JSON.parse(msg.data)                                              // Parse Incoming Message
-
     this.emit('message', obj)
 
     if(obj.type === 'varSet'){                                                  // Variable Sync
@@ -251,10 +257,10 @@ class Bridge extends EventEmitter {
         path: obj.path
       })
     }
-
-    if(obj.type === 'funcReturn'){                                              // Function return value
+    if(obj.type === 'funcReturn' || obj.type === 'funcReject'){                  // Function return value
       if(Object.keys(this.call_queue).includes(obj.id)){
-        this.call_queue[obj.id]['rr'][0](obj.value)                             // Resolve if our call queue contains the return target
+        if (obj.type === 'funcReturn') this.call_queue[obj.id]['rr'][0](obj.value)
+        if (obj.type === 'funcReject') this.call_queue[obj.id]['rr'][1](obj.value)
         clearTimeout(this.call_queue[obj.id]['timeout'])
         delete this.call_queue[obj.id]
       } else {                                                                  // Otherwise forward
